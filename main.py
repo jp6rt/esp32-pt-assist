@@ -1,9 +1,12 @@
 import machine
 import dht
+import network
+import ntptime
 from machine import Pin, SoftI2C, ADC, RTC
 from lcd_api import LcdApi
 from i2c_lcd import I2cLcd
 from time import sleep
+from secrets import wlan_ssid, wlan_password
 
 I2C_ADDR = 0x27
 totalRows = 2
@@ -14,17 +17,21 @@ lcd = I2cLcd(i2c, I2C_ADDR, totalRows, totalColumns)
 rtc = RTC()
 sensor = dht.DHT11(Pin(14))
 
-podomoro_btn_start = Pin(17, Pin.IN)
-podomoro_btn_reset = Pin(16, Pin.IN)
-podomoro_cntr = 0
-# Podomoro time in seconds
-podomoro = 1500
-podomoro_state = False
+pomodoro_btn_start = Pin(17, Pin.IN)
+pomodoro_btn_reset = Pin(16, Pin.IN)
+pomodoro_cntr = 0
+# pomodoro time in seconds
+pomodoro = 1500
+pomodoro_state = False
+is_clock_sync = False
 
 daily_clk_btn_start = Pin(18, Pin.IN)
 daily_clk_btn_pause = Pin(19, Pin.IN)
 daily_clk_cntr = 0
 daily_clk_is_counting = False
+
+wlan = network.WLAN(network.STA_IF)
+wlan.active(True)
 
 def to_str_pad(i):
     return "0{}".format(i) if len(str(i)) == 1 else str(i)
@@ -40,8 +47,8 @@ def get_hms_str():
     
     return ':'.join(list(map(to_str_pad, hms)))
 
-def podomoro_disp():
-    t_remaining = podomoro - podomoro_cntr
+def pomodoro_disp():
+    t_remaining = pomodoro - pomodoro_cntr
     minutes = int(t_remaining / 60)
     seconds = t_remaining % 60
     return "{}:{}".format(to_str_pad(minutes), to_str_pad(seconds))
@@ -52,37 +59,53 @@ def daily_clk_disp():
     seconds = daily_clk_cntr % 60
     return "{}:{}:{}".format(to_str_pad(hours), to_str_pad(minutes), to_str_pad(seconds))
 
-def update_display(force_update=False):
-    """
-    Updates the lcd display every 5s
-    """
-    # current_seconds = rtc.datetime()[6:7][0]
-    # if not current_seconds % 5 == 0 and not force_update:
-    #    return
-    
+def get_sensor_disp():
     sensor.measure()
-    sensor_disp = "{}C {}Ha".format(sensor.temperature(), sensor.humidity())
+    sensor_disp = "{}c{}h".format(sensor.temperature(), sensor.humidity())
+    return sensor_disp
     
+def get_wlan_disp():
+    status = "1" if wlan.isconnected() else "0"
+    return f"wl{status}"
+    
+def update_display(force_update=False):
     # For some reason instead of clearing the lcd which causes an animation when
     # writing characters to the cursors, writing to the x=0, y=0 cursor appears to
     # work without issues
     # lcd.clear()
     lcd.move_to(0, 0)
-    lcd.putstr("{} {}\n{} {}".format(get_hms_str(), sensor_disp, podomoro_disp(), daily_clk_disp()))
+    lcd.putstr("{} {} {}\n{} {}".format(get_hms_str(),
+                                     get_sensor_disp(),
+                                     get_wlan_disp(),
+                                     pomodoro_disp(),
+                                     daily_clk_disp()))
 
 while True:
-    if podomoro_btn_start.value() == 1:
-        podomoro_state = True
+    if not wlan.isconnected():
+        try:
+            wlan.connect(wlan_ssid, wlan_password)
+        except Exception as err:
+            print("wlan error={}".format(err))
+        
+    if not is_clock_sync and wlan.isconnected():
+        try:
+            ntptime.settime()
+            is_clock_sync = True
+        except Exception as err:
+            print("ntptime error={}".format(err))
+    
+    if pomodoro_btn_start.value() == 1:
+        pomodoro_state = True
         update_display(True)
         
-    if podomoro_btn_reset.value() == 1:
-        podomoro_state = False
-        podomoro_cntr = 0
+    if pomodoro_btn_reset.value() == 1:
+        pomodoro_state = False
+        pomodoro_cntr = 0
         update_display(True)
     
-    if podomoro_cntr >= podomoro:
-        podomoro_state = False
-        podomoro_cntr = 0
+    if pomodoro_cntr >= pomodoro:
+        pomodoro_state = False
+        pomodoro_cntr = 0
         update_display(True)
     
     if daily_clk_btn_start.value() == 1:
@@ -93,10 +116,10 @@ while True:
         daily_clk_is_counting = False
         update_display(True)
     
-    if podomoro_state:
-        podomoro_cntr = podomoro_cntr + 1
+    if pomodoro_state:
+        pomodoro_cntr = pomodoro_cntr + 1
         
     if daily_clk_is_counting:
         daily_clk_cntr = daily_clk_cntr + 1
-
+        
     update_display()
