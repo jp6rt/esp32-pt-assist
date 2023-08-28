@@ -42,7 +42,7 @@ def get_hms_str():
     """
     
     # remove seconds to make room for daily counter
-    # hms = rtc.datetime()[4:7]
+    # hms = rtc.datetime()[4:7]    
     hms = rtc.datetime()[4:6]
     
     return ':'.join(list(map(to_str_pad, hms)))
@@ -90,10 +90,14 @@ while True:
     if not is_clock_sync and wlan.isconnected():
         try:
             ntptime.settime()
+            # Update the rtc datetime to show the local timezone (+8 hours)
+            utc_dt = rtc.datetime(
+                tuple(map(lambda x: x[1] if x[0] != 4 else x[1] + 8, enumerate(rtc.datetime())))
+            )
             is_clock_sync = True
         except Exception as err:
             print("ntptime error={}".format(err))
-    
+            
     if pomodoro_btn_start.value() == 1:
         pomodoro_state = True
         update_display(True)
